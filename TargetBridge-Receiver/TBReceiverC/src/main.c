@@ -731,10 +731,11 @@ static void tb_receiver_post_mouse_move(int dx, int dy, CGEventType type, CGMous
     CFRelease(event);
 }
 
-static void tb_receiver_post_mouse_button(CGEventType type, CGMouseButton button) {
+static void tb_receiver_post_mouse_button(CGEventType type, CGMouseButton button, int click_count) {
     CGPoint current = tb_receiver_current_mouse_location();
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, current, button);
     if (!event) return;
+    CGEventSetIntegerValueField(event, kCGMouseEventClickState, click_count);
     CGEventPost(kCGHIDEventTap, event);
     CFRelease(event);
 }
@@ -759,6 +760,11 @@ static void tb_receiver_apply_input_event(const uint8_t *payload, size_t len) {
     extract_json_string_field(payload, len, "\"kind\"", kind, sizeof(kind));
     if (kind[0] == '\0') return;
     tb_receiver_input_log("[input][sender->receiver] received kind=%s len=%zu", kind, len);
+
+    int click_count = 1;
+    (void)extract_json_int_field(payload, len, "\"clickCount\"", &click_count);
+    if (click_count < 1) click_count = 1;
+    if (click_count > 3) click_count = 3;
 
     if (strcmp(kind, "move") == 0) {
         int dx = 0;
@@ -797,27 +803,27 @@ static void tb_receiver_apply_input_event(const uint8_t *payload, size_t len) {
     }
 
     if (strcmp(kind, "leftDown") == 0) {
-        tb_receiver_post_mouse_button(kCGEventLeftMouseDown, kCGMouseButtonLeft);
+        tb_receiver_post_mouse_button(kCGEventLeftMouseDown, kCGMouseButtonLeft, click_count);
         return;
     }
     if (strcmp(kind, "leftUp") == 0) {
-        tb_receiver_post_mouse_button(kCGEventLeftMouseUp, kCGMouseButtonLeft);
+        tb_receiver_post_mouse_button(kCGEventLeftMouseUp, kCGMouseButtonLeft, click_count);
         return;
     }
     if (strcmp(kind, "rightDown") == 0) {
-        tb_receiver_post_mouse_button(kCGEventRightMouseDown, kCGMouseButtonRight);
+        tb_receiver_post_mouse_button(kCGEventRightMouseDown, kCGMouseButtonRight, click_count);
         return;
     }
     if (strcmp(kind, "rightUp") == 0) {
-        tb_receiver_post_mouse_button(kCGEventRightMouseUp, kCGMouseButtonRight);
+        tb_receiver_post_mouse_button(kCGEventRightMouseUp, kCGMouseButtonRight, click_count);
         return;
     }
     if (strcmp(kind, "otherDown") == 0) {
-        tb_receiver_post_mouse_button(kCGEventOtherMouseDown, kCGMouseButtonCenter);
+        tb_receiver_post_mouse_button(kCGEventOtherMouseDown, kCGMouseButtonCenter, click_count);
         return;
     }
     if (strcmp(kind, "otherUp") == 0) {
-        tb_receiver_post_mouse_button(kCGEventOtherMouseUp, kCGMouseButtonCenter);
+        tb_receiver_post_mouse_button(kCGEventOtherMouseUp, kCGMouseButtonCenter, click_count);
         return;
     }
     if (strcmp(kind, "scroll") == 0) {

@@ -78,6 +78,7 @@ struct TBMonitorInputEvent: Codable {
     var scrollX: Int?
     var scrollY: Int?
     var keyCode: UInt16?
+    var clickCount: Int? = nil
 }
 
 struct TBMonitorInputControlMode: Codable {
