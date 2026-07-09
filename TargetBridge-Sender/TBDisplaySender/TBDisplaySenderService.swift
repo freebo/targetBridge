@@ -1718,10 +1718,12 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         }
     }
 
-    private func postLocalMouseButton(type: CGEventType, button: CGMouseButton) {
+    private func postLocalMouseButton(type: CGEventType, button: CGMouseButton, clickCount: Int = 1) {
         logLocalInputInjectionStateIfNeeded(context: "mouseButton")
         guard let current = injectedRemoteMouseLocation ?? currentLocalMouseLocation() else { return }
         guard let event = CGEvent(mouseEventSource: localInputEventSource(), mouseType: type, mouseCursorPosition: current, mouseButton: button) else { return }
+        let clampedClickCount = min(max(clickCount, 1), 3)
+        event.setIntegerValueField(.mouseEventClickState, value: Int64(clampedClickCount))
         event.post(tap: .cghidEventTap)
     }
 
@@ -1833,17 +1835,17 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         case "otherDrag":
             postLocalMouseMove(dx: event.dx ?? 0, dy: event.dy ?? 0, type: .otherMouseDragged, button: .center)
         case "leftDown":
-            postLocalMouseButton(type: .leftMouseDown, button: .left)
+            postLocalMouseButton(type: .leftMouseDown, button: .left, clickCount: event.clickCount ?? 1)
         case "leftUp":
-            postLocalMouseButton(type: .leftMouseUp, button: .left)
+            postLocalMouseButton(type: .leftMouseUp, button: .left, clickCount: event.clickCount ?? 1)
         case "rightDown":
-            postLocalMouseButton(type: .rightMouseDown, button: .right)
+            postLocalMouseButton(type: .rightMouseDown, button: .right, clickCount: event.clickCount ?? 1)
         case "rightUp":
-            postLocalMouseButton(type: .rightMouseUp, button: .right)
+            postLocalMouseButton(type: .rightMouseUp, button: .right, clickCount: event.clickCount ?? 1)
         case "otherDown":
-            postLocalMouseButton(type: .otherMouseDown, button: .center)
+            postLocalMouseButton(type: .otherMouseDown, button: .center, clickCount: event.clickCount ?? 1)
         case "otherUp":
-            postLocalMouseButton(type: .otherMouseUp, button: .center)
+            postLocalMouseButton(type: .otherMouseUp, button: .center, clickCount: event.clickCount ?? 1)
         case "scroll":
             postLocalScroll(scrollX: event.scrollX ?? 0, scrollY: event.scrollY ?? 0)
         case "keyDown":
@@ -2786,11 +2788,6 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         guard isConnected,
               let packet = TBMonitorProtocol.makeJSONPacket(type: .inputEvent, value: event)
         else { return }
-        if event.kind.hasSuffix("Down") || event.kind.hasSuffix("Up") {
-            TBInputDebugLog.log(
-                "[doubleclick-debug] sender packet kind=\(event.kind) clickCount=\(event.clickCount ?? -1) bytes=\(packet.count)"
-            )
-        }
         send(packet)
     }
 

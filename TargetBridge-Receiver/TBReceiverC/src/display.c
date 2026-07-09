@@ -1134,12 +1134,18 @@ unsigned int tb_disp_poll_actions(struct tb_display *d) {
                 if (ev.button.button == SDL_BUTTON_LEFT) input_event.kind = TB_INPUT_EVENT_LEFT_DOWN;
                 else if (ev.button.button == SDL_BUTTON_RIGHT) input_event.kind = TB_INPUT_EVENT_RIGHT_DOWN;
                 else input_event.kind = TB_INPUT_EVENT_OTHER_DOWN;
+                input_event.click_count = ev.button.clicks;
+                if (input_event.click_count < 1) input_event.click_count = 1;
+                if (input_event.click_count > 3) input_event.click_count = 3;
                 tb_disp_queue_input_event(d, &input_event);
                 break;
             case SDL_MOUSEBUTTONUP:
                 if (ev.button.button == SDL_BUTTON_LEFT) input_event.kind = TB_INPUT_EVENT_LEFT_UP;
                 else if (ev.button.button == SDL_BUTTON_RIGHT) input_event.kind = TB_INPUT_EVENT_RIGHT_UP;
                 else input_event.kind = TB_INPUT_EVENT_OTHER_UP;
+                input_event.click_count = ev.button.clicks;
+                if (input_event.click_count < 1) input_event.click_count = 1;
+                if (input_event.click_count > 3) input_event.click_count = 3;
                 tb_disp_queue_input_event(d, &input_event);
                 break;
             case SDL_KEYDOWN:

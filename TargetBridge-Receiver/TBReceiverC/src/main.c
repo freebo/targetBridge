@@ -182,6 +182,12 @@ static int tb_receiver_get_clipboard_text(char *dest, size_t size);
 static void tb_receiver_send_clipboard_if_changed(struct app *a);
 static void write_be32(uint8_t *dst, uint32_t value);
 
+static int tb_receiver_clamp_click_count(int click_count) {
+    if (click_count < 1) return 1;
+    if (click_count > 3) return 3;
+    return click_count;
+}
+
 static int tb_receiver_is_valid_language_pref(const char *language_pref) {
     return language_pref &&
            (strcmp(language_pref, "auto") == 0 ||
@@ -736,15 +742,6 @@ static void tb_receiver_post_mouse_button(CGEventType type, CGMouseButton button
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, current, button);
     if (!event) return;
     CGEventSetIntegerValueField(event, kCGMouseEventClickState, click_count);
-    int64_t applied_click_count = CGEventGetIntegerValueField(event, kCGMouseEventClickState);
-    tb_receiver_input_log("[doubleclick-debug] receiver inject type=%u button=%u click=%d appliedClick=%lld x=%.1f y=%.1f ts=%llu",
-                          (unsigned)type,
-                          (unsigned)button,
-                          click_count,
-                          (long long)applied_click_count,
-                          current.x,
-                          current.y,
-                          (unsigned long long)CGEventGetTimestamp(event));
     CGEventPost(kCGHIDEventTap, event);
     CFRelease(event);
 }
@@ -771,20 +768,8 @@ static void tb_receiver_apply_input_event(const uint8_t *payload, size_t len) {
     tb_receiver_input_log("[input][sender->receiver] received kind=%s len=%zu", kind, len);
 
     int raw_click_count = 1;
-    int has_click_count = extract_json_int_field(payload, len, "\"clickCount\"", &raw_click_count);
-    int click_count = raw_click_count;
-    if (click_count < 1) click_count = 1;
-    if (click_count > 3) click_count = 3;
-    if (strcmp(kind, "leftDown") == 0 || strcmp(kind, "leftUp") == 0 ||
-        strcmp(kind, "rightDown") == 0 || strcmp(kind, "rightUp") == 0 ||
-        strcmp(kind, "otherDown") == 0 || strcmp(kind, "otherUp") == 0) {
-        tb_receiver_input_log("[doubleclick-debug] receiver parse kind=%s hasClick=%d rawClick=%d clampedClick=%d len=%zu",
-                              kind,
-                              has_click_count,
-                              raw_click_count,
-                              click_count,
-                              len);
-    }
+    (void)extract_json_int_field(payload, len, "\"clickCount\"", &raw_click_count);
+    int click_count = tb_receiver_clamp_click_count(raw_click_count);
 
     if (strcmp(kind, "move") == 0) {
         int dx = 0;
@@ -1177,13 +1162,14 @@ static int send_all(int fd, const uint8_t *buf, size_t len) {
     return 0;
 }
 
-static void tb_receiver_send_input_event(struct app *a,
-                                         const char *kind,
-                                         int has_dx, int dx,
-                                         int has_dy, int dy,
-                                         int has_scroll_x, int scroll_x,
-                                         int has_scroll_y, int scroll_y,
-                                         int has_key_code, uint16_t key_code) {
+static void tb_receiver_send_input_event_with_click_count(struct app *a,
+                                                          const char *kind,
+                                                          int has_dx, int dx,
+                                                          int has_dy, int dy,
+                                                          int has_scroll_x, int scroll_x,
+                                                          int has_scroll_y, int scroll_y,
+                                                          int has_key_code, uint16_t key_code,
+                                                          int has_click_count, int click_count) {
     if (!a || a->client_fd < 0) return;
     if (strcmp(a->input_control_mode, "receiverMaster") != 0) return;
 
@@ -1196,6 +1182,7 @@ static void tb_receiver_send_input_event(struct app *a,
     if (has_scroll_x) len += snprintf(json + len, sizeof(json) - (size_t)len, ",\"scrollX\":%d", scroll_x);
     if (has_scroll_y) len += snprintf(json + len, sizeof(json) - (size_t)len, ",\"scrollY\":%d", scroll_y);
     if (has_key_code) len += snprintf(json + len, sizeof(json) - (size_t)len, ",\"keyCode\":%u", (unsigned int)key_code);
+    if (has_click_count) len += snprintf(json + len, sizeof(json) - (size_t)len, ",\"clickCount\":%d", tb_receiver_clamp_click_count(click_count));
     len += snprintf(json + len, sizeof(json) - (size_t)len, "}");
     if (len <= 0 || (size_t)len >= sizeof(json)) return;
 
@@ -1216,6 +1203,23 @@ static void tb_receiver_send_input_event(struct app *a,
                               a->input_control_mode);
     }
     (void)send_all(a->client_fd, pkt, 5 + (size_t)len);
+}
+
+static void tb_receiver_send_input_event(struct app *a,
+                                         const char *kind,
+                                         int has_dx, int dx,
+                                         int has_dy, int dy,
+                                         int has_scroll_x, int scroll_x,
+                                         int has_scroll_y, int scroll_y,
+                                         int has_key_code, uint16_t key_code) {
+    tb_receiver_send_input_event_with_click_count(a,
+                                                  kind,
+                                                  has_dx, dx,
+                                                  has_dy, dy,
+                                                  has_scroll_x, scroll_x,
+                                                  has_scroll_y, scroll_y,
+                                                  has_key_code, key_code,
+                                                  0, 0);
 }
 
 static void tb_receiver_send_target_switch(struct app *a, int direction) {
@@ -1321,29 +1325,47 @@ static CGEventRef tb_receiver_input_tap_callback(CGEventTapProxy proxy,
         break;
     }
     case kCGEventLeftMouseDown:
-        tb_receiver_send_input_event(a, "leftDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "leftDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventLeftMouseUp:
-        tb_receiver_send_input_event(a, "leftUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "leftUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventRightMouseDown:
-        tb_receiver_send_input_event(a, "rightDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "rightDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventRightMouseUp:
-        tb_receiver_send_input_event(a, "rightUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "rightUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventOtherMouseDown:
-        tb_receiver_send_input_event(a, "otherDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "otherDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventOtherMouseUp:
-        tb_receiver_send_input_event(a, "otherUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    {
+        int click_count = tb_receiver_clamp_click_count((int)CGEventGetIntegerValueField(event, kCGMouseEventClickState));
+        tb_receiver_send_input_event_with_click_count(a, "otherUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, click_count);
         should_consume = a->input_tap_consumes_events;
         break;
+    }
     case kCGEventScrollWheel: {
         int sx = (int)CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis2);
         int sy = (int)CGEventGetIntegerValueField(event, kCGScrollWheelEventDeltaAxis1);
@@ -1872,22 +1894,22 @@ int main(int argc, char **argv) {
                     tb_receiver_send_input_event(&a, "scroll", 0, 0, 0, 0, 1, input_event.scroll_x, 1, input_event.scroll_y, 0, 0);
                     break;
                 case TB_INPUT_EVENT_LEFT_DOWN:
-                    tb_receiver_send_input_event(&a, "leftDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "leftDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_LEFT_UP:
-                    tb_receiver_send_input_event(&a, "leftUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "leftUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_RIGHT_DOWN:
-                    tb_receiver_send_input_event(&a, "rightDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "rightDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_RIGHT_UP:
-                    tb_receiver_send_input_event(&a, "rightUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "rightUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_OTHER_DOWN:
-                    tb_receiver_send_input_event(&a, "otherDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "otherDown", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_OTHER_UP:
-                    tb_receiver_send_input_event(&a, "otherUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                    tb_receiver_send_input_event_with_click_count(&a, "otherUp", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.click_count);
                     break;
                 case TB_INPUT_EVENT_KEY_DOWN:
                     tb_receiver_send_input_event(&a, "keyDown", 0, 0, 0, 0, 0, 0, 0, 0, 1, input_event.key_code);
