@@ -736,6 +736,15 @@ static void tb_receiver_post_mouse_button(CGEventType type, CGMouseButton button
     CGEventRef event = CGEventCreateMouseEvent(NULL, type, current, button);
     if (!event) return;
     CGEventSetIntegerValueField(event, kCGMouseEventClickState, click_count);
+    int64_t applied_click_count = CGEventGetIntegerValueField(event, kCGMouseEventClickState);
+    tb_receiver_input_log("[doubleclick-debug] receiver inject type=%u button=%u click=%d appliedClick=%lld x=%.1f y=%.1f ts=%llu",
+                          (unsigned)type,
+                          (unsigned)button,
+                          click_count,
+                          (long long)applied_click_count,
+                          current.x,
+                          current.y,
+                          (unsigned long long)CGEventGetTimestamp(event));
     CGEventPost(kCGHIDEventTap, event);
     CFRelease(event);
 }
@@ -761,10 +770,21 @@ static void tb_receiver_apply_input_event(const uint8_t *payload, size_t len) {
     if (kind[0] == '\0') return;
     tb_receiver_input_log("[input][sender->receiver] received kind=%s len=%zu", kind, len);
 
-    int click_count = 1;
-    (void)extract_json_int_field(payload, len, "\"clickCount\"", &click_count);
+    int raw_click_count = 1;
+    int has_click_count = extract_json_int_field(payload, len, "\"clickCount\"", &raw_click_count);
+    int click_count = raw_click_count;
     if (click_count < 1) click_count = 1;
     if (click_count > 3) click_count = 3;
+    if (strcmp(kind, "leftDown") == 0 || strcmp(kind, "leftUp") == 0 ||
+        strcmp(kind, "rightDown") == 0 || strcmp(kind, "rightUp") == 0 ||
+        strcmp(kind, "otherDown") == 0 || strcmp(kind, "otherUp") == 0) {
+        tb_receiver_input_log("[doubleclick-debug] receiver parse kind=%s hasClick=%d rawClick=%d clampedClick=%d len=%zu",
+                              kind,
+                              has_click_count,
+                              raw_click_count,
+                              click_count,
+                              len);
+    }
 
     if (strcmp(kind, "move") == 0) {
         int dx = 0;

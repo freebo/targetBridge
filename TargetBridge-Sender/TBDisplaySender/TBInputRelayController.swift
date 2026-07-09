@@ -126,6 +126,13 @@ final class TBInputRelayController {
 
     private func handle(_ event: NSEvent) {
         guard let handler, let relayEvent = convert(event) else { return }
+        if event.type == .leftMouseDown || event.type == .leftMouseUp ||
+            event.type == .rightMouseDown || event.type == .rightMouseUp ||
+            event.type == .otherMouseDown || event.type == .otherMouseUp {
+            TBInputDebugLog.log(
+                "[doubleclick-debug] sender capture type=\(event.type.rawValue) button=\(event.buttonNumber) clickCount=\(event.clickCount) ts=\(event.timestamp) mouse=\(NSEvent.mouseLocation) relayKind=\(relayEvent.kind) relayClick=\(relayEvent.clickCount ?? -1)"
+            )
+        }
         handler(relayEvent)
     }
 

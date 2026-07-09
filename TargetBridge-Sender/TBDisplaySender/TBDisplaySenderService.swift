@@ -2786,6 +2786,11 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         guard isConnected,
               let packet = TBMonitorProtocol.makeJSONPacket(type: .inputEvent, value: event)
         else { return }
+        if event.kind.hasSuffix("Down") || event.kind.hasSuffix("Up") {
+            TBInputDebugLog.log(
+                "[doubleclick-debug] sender packet kind=\(event.kind) clickCount=\(event.clickCount ?? -1) bytes=\(packet.count)"
+            )
+        }
         send(packet)
     }
 
