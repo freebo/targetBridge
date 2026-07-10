@@ -4,6 +4,7 @@
 .build/
 DerivedData/
 build/
+build-artifacts/
 
 # Xcode user data
 xcuserdata/

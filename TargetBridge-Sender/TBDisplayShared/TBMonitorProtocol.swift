@@ -83,10 +83,7 @@ struct TBMonitorInputEvent: Codable {
 
 struct TBMonitorInputControlMode: Codable {
     var mode: String
-}cd ~/projects/targetBridge
-git pull
-cd TargetBridge-Receiver
-./scripts/build_tbreceiver_c_app.sh
+}
 
 struct TBMonitorBrightness: Codable {
     var level: Double
