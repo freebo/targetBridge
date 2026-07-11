@@ -1611,7 +1611,7 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
                         releaseInjectedModifiersIfNeeded()
                         onRemoteDeactivateInputRequest?()
                     } else {
-                        applyIncomingInputEvent(event)
+                        applyIncomingInputEvent(event, payload: payload)
                     }
                 }
             case .heartbeat:
@@ -1718,10 +1718,11 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         }
     }
 
-    private func postLocalMouseButton(type: CGEventType, button: CGMouseButton) {
+    private func postLocalMouseButton(type: CGEventType, button: CGMouseButton, clickCount: Int = 1) {
         logLocalInputInjectionStateIfNeeded(context: "mouseButton")
         guard let current = injectedRemoteMouseLocation ?? currentLocalMouseLocation() else { return }
         guard let event = CGEvent(mouseEventSource: localInputEventSource(), mouseType: type, mouseCursorPosition: current, mouseButton: button) else { return }
+        event.setIntegerValueField(.mouseEventClickState, value: Int64(max(clickCount, 1)))
         event.post(tap: .cghidEventTap)
     }
 
@@ -1821,7 +1822,7 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         controlUp.post(tap: .cghidEventTap)
     }
 
-    private func applyIncomingInputEvent(_ event: TBMonitorInputEvent) {
+    private func applyIncomingInputEvent(_ event: TBMonitorInputEvent, payload: Data) {
         TBInputDebugLog.log("sender applying incoming event kind=\(event.kind)")
         switch event.kind {
         case "move":
@@ -1833,17 +1834,23 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
         case "otherDrag":
             postLocalMouseMove(dx: event.dx ?? 0, dy: event.dy ?? 0, type: .otherMouseDragged, button: .center)
         case "leftDown":
-            postLocalMouseButton(type: .leftMouseDown, button: .left)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .leftMouseDown, button: .left, clickCount: buttonEvent?.clickCount ?? 1)
         case "leftUp":
-            postLocalMouseButton(type: .leftMouseUp, button: .left)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .leftMouseUp, button: .left, clickCount: buttonEvent?.clickCount ?? 1)
         case "rightDown":
-            postLocalMouseButton(type: .rightMouseDown, button: .right)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .rightMouseDown, button: .right, clickCount: buttonEvent?.clickCount ?? 1)
         case "rightUp":
-            postLocalMouseButton(type: .rightMouseUp, button: .right)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .rightMouseUp, button: .right, clickCount: buttonEvent?.clickCount ?? 1)
         case "otherDown":
-            postLocalMouseButton(type: .otherMouseDown, button: .center)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .otherMouseDown, button: .center, clickCount: buttonEvent?.clickCount ?? 1)
         case "otherUp":
-            postLocalMouseButton(type: .otherMouseUp, button: .center)
+            let buttonEvent = TBMonitorProtocol.decodeJSON(TBMonitorInputButtonEvent.self, from: payload)
+            postLocalMouseButton(type: .otherMouseUp, button: .center, clickCount: buttonEvent?.clickCount ?? 1)
         case "scroll":
             postLocalScroll(scrollX: event.scrollX ?? 0, scrollY: event.scrollY ?? 0)
         case "keyDown":
@@ -2783,6 +2790,13 @@ final class TBDisplaySenderSession: NSObject, ObservableObject, Identifiable, @u
     }
 
     func sendInputEvent(_ event: TBMonitorInputEvent) {
+        guard isConnected,
+              let packet = TBMonitorProtocol.makeJSONPacket(type: .inputEvent, value: event)
+        else { return }
+        send(packet)
+    }
+
+    func sendInputButtonEvent(_ event: TBMonitorInputButtonEvent) {
         guard isConnected,
               let packet = TBMonitorProtocol.makeJSONPacket(type: .inputEvent, value: event)
         else { return }
