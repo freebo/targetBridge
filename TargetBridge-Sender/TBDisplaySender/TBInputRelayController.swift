@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class TBInputRelayController {
     typealias Handler = (TBMonitorInputEvent) -> Void
+    typealias ButtonHandler = (TBMonitorInputButtonEvent) -> Void
     typealias SwitchHandler = (_ direction: Int) -> Void
     typealias DeactivateHandler = () -> Void
 
@@ -13,6 +14,7 @@ final class TBInputRelayController {
     private var localMonitors: [Any] = []
     private var globalMonitors: [Any] = []
     private var handler: Handler?
+    private var buttonHandler: ButtonHandler?
     private var switchHandler: SwitchHandler?
     private var deactivateHandler: DeactivateHandler?
     private var gestureMode: TBInputGestureMode = .native
@@ -22,12 +24,14 @@ final class TBInputRelayController {
     func start(
         gestureMode: TBInputGestureMode,
         handler: @escaping Handler,
+        buttonHandler: @escaping ButtonHandler,
         switchHandler: @escaping SwitchHandler,
         deactivateHandler: @escaping DeactivateHandler
     ) {
         stop()
         self.gestureMode = gestureMode
         self.handler = handler
+        self.buttonHandler = buttonHandler
         self.switchHandler = switchHandler
         self.deactivateHandler = deactivateHandler
         beginKeepAwakeActivity()
@@ -48,6 +52,7 @@ final class TBInputRelayController {
         globalMonitors.removeAll()
         endKeepAwakeActivity()
         handler = nil
+        buttonHandler = nil
         switchHandler = nil
         deactivateHandler = nil
     }
@@ -125,8 +130,33 @@ final class TBInputRelayController {
     }
 
     private func handle(_ event: NSEvent) {
+        if let buttonHandler, let buttonEvent = convertButton(event) {
+            buttonHandler(buttonEvent)
+            return
+        }
         guard let handler, let relayEvent = convert(event) else { return }
         handler(relayEvent)
+    }
+
+    private func convertButton(_ event: NSEvent) -> TBMonitorInputButtonEvent? {
+        let kind: String
+        switch event.type {
+        case .leftMouseDown:
+            kind = "leftDown"
+        case .leftMouseUp:
+            kind = "leftUp"
+        case .rightMouseDown:
+            kind = "rightDown"
+        case .rightMouseUp:
+            kind = "rightUp"
+        case .otherMouseDown:
+            kind = "otherDown"
+        case .otherMouseUp:
+            kind = "otherUp"
+        default:
+            return nil
+        }
+        return TBMonitorInputButtonEvent(kind: kind, clickCount: event.clickCount)
     }
 
     private func convert(_ event: NSEvent) -> TBMonitorInputEvent? {
@@ -167,18 +197,6 @@ final class TBInputRelayController {
                 scrollY: nil,
                 keyCode: nil
             )
-        case .leftMouseDown:
-            return TBMonitorInputEvent(kind: "leftDown", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
-        case .leftMouseUp:
-            return TBMonitorInputEvent(kind: "leftUp", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
-        case .rightMouseDown:
-            return TBMonitorInputEvent(kind: "rightDown", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
-        case .rightMouseUp:
-            return TBMonitorInputEvent(kind: "rightUp", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
-        case .otherMouseDown:
-            return TBMonitorInputEvent(kind: "otherDown", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
-        case .otherMouseUp:
-            return TBMonitorInputEvent(kind: "otherUp", dx: nil, dy: nil, scrollX: nil, scrollY: nil, keyCode: nil)
         case .scrollWheel:
             return TBMonitorInputEvent(
                 kind: "scroll",

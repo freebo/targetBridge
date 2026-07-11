@@ -544,6 +544,12 @@ final class TBDisplaySenderService: ObservableObject {
                 else { return }
                 session.sendInputEvent(relayEvent)
             },
+            buttonHandler: { [weak self] buttonEvent in
+                guard let self,
+                      session.isConnected
+                else { return }
+                session.sendInputButtonEvent(buttonEvent)
+            },
             switchHandler: { [weak self] direction in
                 self?.switchSenderMasterTarget(direction: direction)
             },
